@@ -14,7 +14,7 @@ Endnote、Zotero、Mendeleyといった既存の文献管理ソフトには、�
 
 「この論文に関連する文献を探して、ライブラリに追加して、APAスタイルで引用を生成して」
 
-こう頼めるAI agentがほしかった。そのためには、AI agentが操作できるインターフェースを持つ文献管理ツールが必要だった。ということで作った。
+こう頼めるAI agentがほしかった。そのためには、AI agentが操作できるインターフェースを持つ文献管理ツールが必要だった。ということで[Claude Code](https://code.claude.com/)を使って作った。
 
 https://github.com/ncukondo/reference-manager
 

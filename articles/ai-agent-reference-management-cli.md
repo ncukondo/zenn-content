@@ -56,6 +56,115 @@ CLIだけでも基本操作はできるが、実際の研究ワークフロー�
 
 MCPツールが「1つの操作」を提供するのに対し、Skillsは「複数のCLIコマンドの組み合わせによるワークフロー」を定義できる。PMIDやDOIを含まないURLから文献を登録したいときや、登録と同時にフルテキスト取得まで行いたいときなど、定型的だが複数ステップにまたがる操作をSkillでまとめている。
 
+例えば、以下は実際に使っている「文献検索・登録」Skillだ。`.claude/skills/find-paper/SKILL.md`として配置すると、Claude Codeで`/find-paper [URL / キーワード / PMID / DOI]`と呼び出すだけで、論文の特定から登録、フルテキスト取得までを自動で実行してくれる。
+
+:::details Skill定義の全文（SKILL.md）
+```markdown
+---
+name: find-paper
+description: 学術文献の検索・登録・フルテキスト入手を行う。記事URL、キーワード、PMID、PubMed URL、DOIなどの入力から関連する査読済み論文を特定し、refコマンドで登録してフルテキストを取得する。
+argument-hint: "[URL / キーワード / PMID / DOI]"
+---
+
+# 文献検索・登録スキル
+
+ユーザーの入力 `$ARGUMENTS` から学術文献を特定し、`ref` コマンドで登録、フルテキストの取得まで自動で行う。
+
+## 入力の判定
+
+まず入力の種類を判定する：
+
+1. **PMID** — 数字のみ（例: `41015033`）
+2. **PubMed URL** — `pubmed.ncbi.nlm.nih.gov` を含むURL → PMIDを抽出
+3. **PMC URL** — `pmc.ncbi.nlm.nih.gov` を含むURL → PMCIDを抽出
+4. **DOI** — `10.` で始まる文字列、または `doi.org/` を含むURL
+5. **arXiv** — `arxiv.org` を含むURL、または `arXiv:` で始まるID
+6. **一般URL** — 上記以外のURL（ブログ記事、ニュース記事など）
+7. **キーワード** — URL・数字・DOIのいずれでもないテキスト
+
+## 処理フロー
+
+### パターン A: PMID / DOI / arXiv ID が判明している場合
+
+直接登録に進む（→「登録と取得」セクション）。
+
+### パターン B: 一般URL（ブログ記事等）の場合
+
+1. WebFetchでURLの内容を取得し、引用されている論文・DOI・参考文献を抽出する
+2. 取得できない場合（403等）はWebSearchで記事タイトル・内容を検索する
+3. 記事内で引用されている論文、または記事のテーマに最も関連する査読済み論文をWebSearchでPubMed・arXiv等から検索する
+4. 候補論文を特定し、パターンAに進む
+
+### パターン C: キーワードの場合
+
+1. WebSearchで `{キーワード} site:pubmed.ncbi.nlm.nih.gov OR site:arxiv.org` を検索する
+2. 必要に応じて追加の検索クエリを試す（同義語、英語変換など）
+3. 候補論文を特定し、パターンAに進む
+
+### 候補が複数ある場合
+
+最も関連性の高い論文を最大3件まで提示し、ユーザーに登録対象を確認する。
+明らかに1件のみが該当する場合は確認なしで登録に進む。
+
+## 登録と取得
+
+### ステップ1: ref add で登録
+
+識別子の種類に応じてコマンドを実行する：
+
+ref add --fetch-fulltext {PMID}
+ref add --fetch-fulltext {DOI}
+ref add --fetch-fulltext {arXiv_ID}
+
+`--fetch-fulltext` を付けて、登録と同時にOAフルテキストの自動取得を試みる。
+
+コマンドの出力からcitation keyを記録する。
+
+### ステップ2: フルテキスト取得の確認
+
+`ref add --fetch-fulltext` でフルテキストが取得できなかった場合：
+
+1. `ref fulltext discover {citation_key}` でOA利用可能性を確認する
+2. 利用可能なソースがあれば `ref fulltext fetch {citation_key}` を実行する
+3. それでも取得できない場合は、以下のURLをユーザーに提示する：
+   - DOIがある場合: `https://doi.org/{DOI}`
+   - PMCIDがある場合: `https://pmc.ncbi.nlm.nih.gov/articles/{PMCID}/`
+   - PubMedがある場合: `https://pubmed.ncbi.nlm.nih.gov/{PMID}/`
+
+## 出力フォーマット
+
+### 論文情報を表形式で出力
+
+| 項目 | 詳細 |
+|------|------|
+| **タイトル** | （論文タイトル） |
+| **著者** | （全著者名） |
+| **雑誌** | （ジャーナル名） |
+| **年** | （出版年） |
+| **DOI** | （DOI） |
+| **PMID** | （PubMed ID、あれば） |
+| **Citation Key** | （ref addで割り当てられたkey） |
+
+### アブストラクトの要約
+
+日本語で3-5文程度に要約する。
+
+### 登録・取得結果
+
+- ref addの結果（成功/失敗、重複検出など）
+- フルテキスト取得の結果
+  - 自動取得できた場合: 「フルテキストを取得しました」
+  - 手動取得が必要な場合: アクセス用URLを提示
+
+## 注意事項
+
+- 入力が一般URLの場合、元記事が学術論文でない場合はその旨を明記する
+- `ref add` が重複を検出した場合はユーザーに通知し、`--force` での上書き登録をするか確認する
+```
+:::
+
+ポイントは、Skill定義がすべて自然言語で書かれていることだ。入力の判定ロジック、フォールバック処理、ユーザーへの出力フォーマットまで、プログラミングなしで定義できる。AI agentはこの指示を読んで、`ref add`や`ref fulltext fetch`等のCLIコマンドを適切に組み合わせて実行する。
+
 MCPはClaude Desktopのようなターミナルのない環境では依然として有用だ。ただ、Claude Codeのようなターミナルベースの環境では、Skills + CLIの方がセットアップ不要で柔軟性も高い。
 
 ## AI agentに使いやすいCLIとは

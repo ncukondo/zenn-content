@@ -3,7 +3,7 @@ title: "AI agentに文献管理をさせるために必要だったのは、良�
 emoji: "📚"
 type: "tech"
 topics: ["cli", "mcp", "ai", "claude", "論文管理"]
-published: false
+published: true
 ---
 
 ## はじめに
